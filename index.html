@@ -42,9 +42,12 @@
     background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin: 12px 0; padding: 10px; text-align: center; }
   .scoreboard .pts { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .scoreboard .dash { color: var(--muted); padding: 0 8px; }
-  .team-name { width: 100%; border: 0; background: none; color: var(--text); text-align: center;
-    font: inherit; font-weight: 600; font-size: 14px; padding: 2px; border-bottom: 1px dashed var(--line); }
-  .team-name:focus { outline: none; border-bottom-color: var(--accent); }
+  .name-wrap { position: relative; }
+  .team-name { width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--text); text-align: center;
+    font: inherit; font-weight: 600; font-size: 16px; padding: 6px 22px; border-radius: 8px; }
+  .team-name:focus { outline: none; border-color: var(--accent); }
+  .name-wrap::after { content: "✎"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font-size: 13px; pointer-events: none; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .col { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
   .col h2 { font-size: 14px; margin: 0 0 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -97,9 +100,9 @@
   </nav>
   <div class="scoreboard">
     <div class="period-label" id="periodLabel"></div>
-    <div><input class="team-name" data-team="0" maxlength="20"><div class="pts" id="pts0">0</div></div>
+    <div><div class="name-wrap"><input class="team-name" data-team="0" maxlength="20" placeholder="Home team" aria-label="Home team name" enterkeyhint="done"></div><div class="pts" id="pts0">0</div></div>
     <div class="dash">–</div>
-    <div><input class="team-name" data-team="1" maxlength="20"><div class="pts" id="pts1">0</div></div>
+    <div><div class="name-wrap"><input class="team-name" data-team="1" maxlength="20" placeholder="Away team" aria-label="Away team name" enterkeyhint="done"></div><div class="pts" id="pts1">0</div></div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="actions">
@@ -311,6 +314,8 @@ document.querySelectorAll('.team-name').forEach(i => {
     state.teams[i.dataset.team] = i.value.trim() || (i.dataset.team === '0' ? 'Home' : 'Away');
     save(); renderTracker();
   });
+  i.addEventListener('focus', () => i.select());
+  i.addEventListener('blur', () => { i.value = state.teams[i.dataset.team]; });
   i.addEventListener('keydown', e => { if (e.key === 'Enter') i.blur(); });
 });
 
