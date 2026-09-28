@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#111827">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>5-Min Stats</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
   :root {
     --bg: #f3f4f6; --card: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
@@ -76,12 +79,27 @@
   thead th { color: var(--muted); font-size: 12px; font-weight: 600; }
   tr:last-child td { border-bottom: 0; }
   td .pct { display: block; font-size: 11px; color: var(--muted); }
+  .hdr-btn { border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit;
+    font-size: 14px; font-weight: 600; padding: 7px 12px; border-radius: 999px; }
+  .hdr-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .new-game { width: 100%; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 700;
+    padding: 14px; border-radius: 12px; margin: 12px 0; }
+  .game-item { display: flex; align-items: stretch; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 8px; overflow: hidden; }
+  .game-item.current { border-color: var(--accent); }
+  .game-item .open { flex: 1; text-align: left; border: 0; background: none; color: var(--text); font: inherit; padding: 12px; }
+  .game-item .open b { display: block; }
+  .game-item .open small { color: var(--muted); font-size: 12px; }
+  .game-item .badge { color: var(--accent); font-weight: 700; }
+  .game-item .del { border: 0; border-left: 1px solid var(--line); background: none; color: var(--miss);
+    font-size: 18px; padding: 0 16px; }
   .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <header>
   <h1><span>5</span>-Min Stats</h1>
+  <button id="gamesBtn" class="hdr-btn">☰ Games</button>
 </header>
 
 <nav class="tabs" id="mainTabs">
@@ -129,8 +147,14 @@
   <div class="log" id="log2"></div>
 </section>
 
+<section id="games" class="hidden">
+  <button id="newGame" class="new-game">+ New game</button>
+  <div id="gameList"></div>
+  <div class="log" id="log3"></div>
+</section>
+
 <script>
-const KEY = 'fiveminstats.v2';
+const KEY = 'fiveminstats.v3';
 const SHOTS = [
   { k: 't3', label: '3PT', pts: 3 },
   { k: 't2', label: '2PT', pts: 2 },
@@ -149,26 +173,48 @@ const blankStats = () => ({
     [q, { first: [blankTeam(), blankTeam()], last: [blankTeam(), blankTeam()] }])),
   ot: { full: [blankTeam(), blankTeam()] },
 });
-const blankState = () => ({
+const newGame = () => ({
+  id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+  created: Date.now(),
   teams: ['Home', 'Away'],
-  view: '1',      // '1'..'4', 'ot' or 'summary'
-  half: 'first',  // 'first' | 'last' (ignored in OT)
-  sum: '1',       // summary filter: '1'..'4', 'ot' or 'all'
   stats: blankStats(),
   history: [],
 });
+const blankState = () => {
+  const g = newGame();
+  return {
+    games: [g],     // newest first
+    currentId: g.id,
+    view: '1',      // '1'..'4', 'ot', 'summary' or 'games'
+    half: 'first',  // 'first' | 'last' (ignored in OT)
+    sum: '1',       // summary filter: '1'..'4', 'ot' or 'all'
+  };
+};
 
 let state;
 try { state = JSON.parse(localStorage.getItem(KEY)); } catch {}
-if (!state) {
+if (!state?.games?.length) {
   state = blankState();
-  // Keep team names from the previous version
-  try { const old = JSON.parse(localStorage.getItem('fiveminstats.v1')); if (old?.teams) state.teams = old.teams; } catch {}
+  // Bring over the single game saved by the previous version
+  try {
+    const old = JSON.parse(localStorage.getItem('fiveminstats.v2'));
+    if (old?.stats) Object.assign(state.games[0], {
+      teams: old.teams, stats: { ...blankStats(), ...old.stats }, history: old.history || [],
+    });
+  } catch {}
 }
-// Games saved before OT existed
-if (!state.stats.ot) state.stats.ot = blankStats().ot;
+
+let game; // the game currently being tracked
+function selectGame(id) {
+  game = state.games.find(g => g.id === id) || state.games[0];
+  state.currentId = game.id;
+}
+selectGame(state.currentId);
+
 const curHalf = () => state.view === 'ot' ? 'full' : state.half;
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+// Ask the browser not to clear saved games when the phone is low on space
+navigator.storage?.persist?.().catch(() => {});
 
 const $ = s => document.querySelector(s);
 const pct = (m, a) => a ? Math.round(m / a * 100) + '%' : '–';
@@ -179,13 +225,13 @@ const sumTeams = list => list.reduce((acc, s) => {
 }, blankTeam());
 // Stats for team t in a half, for one quarter or summed across the game
 const statsFor = (q, half, t) => q === 'all'
-  ? sumTeams(QUARTERS.map(x => state.stats[x][half][t]))
-  : state.stats[q][half][t];
+  ? sumTeams(QUARTERS.map(x => game.stats[x][half][t]))
+  : game.stats[q][half][t];
 
 function renderTracker() {
-  const stats = state.stats[state.view][curHalf()];
+  const stats = game.stats[state.view][curHalf()];
   document.querySelectorAll('.team-name').forEach(i => {
-    if (document.activeElement !== i) i.value = state.teams[i.dataset.team];
+    if (document.activeElement !== i) i.value = game.teams[i.dataset.team];
   });
   $('#halfTabs').classList.toggle('hidden', state.view === 'ot');
   $('#periodLabel').textContent = periodName(state.view, curHalf());
@@ -194,7 +240,7 @@ function renderTracker() {
 
   $('#grid').innerHTML = [0, 1].map(t => `
     <div class="col">
-      <h2>${esc(state.teams[t])}</h2>
+      <h2>${esc(game.teams[t])}</h2>
       ${SHOTS.map(({ k, label }) => {
         const m = stats[t][k + 'm'], x = stats[t][k + 'x'];
         return `<div class="shot">
@@ -205,7 +251,7 @@ function renderTracker() {
           </div></div>`;
       }).join('')}
     </div>`).join('');
-  $('#undo').disabled = !state.history.length;
+  $('#undo').disabled = !game.history.length;
 }
 
 function row(name, s) {
@@ -219,7 +265,7 @@ function row(name, s) {
     <td><b>${points(s)}</b></td></tr>`;
 }
 
-const otPlayed = () => state.stats.ot.full.some(s => Object.values(s).some(v => v > 0));
+const otPlayed = () => game.stats.ot.full.some(s => Object.values(s).some(v => v > 0));
 
 // Tables to show for a summary filter: [quarter, half, caption]
 function sections(q) {
@@ -236,7 +282,7 @@ function renderSummary() {
     <table>
       <caption>${caption}</caption>
       <thead><tr><th>Team</th><th>3PT</th><th>2PT</th><th>FG</th><th>FT</th><th>PTS</th></tr></thead>
-      <tbody>${[0, 1].map(t => row(state.teams[t], statsFor(q, half, t))).join('')}</tbody>
+      <tbody>${[0, 1].map(t => row(game.teams[t], statsFor(q, half, t))).join('')}</tbody>
     </table>`).join('');
 }
 
@@ -244,10 +290,33 @@ function render() {
   document.querySelectorAll('#mainTabs button').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
   document.querySelectorAll('#halfTabs button').forEach(b => b.classList.toggle('active', b.dataset.half === state.half));
   document.querySelectorAll('#sumTabs button').forEach(b => b.classList.toggle('active', b.dataset.sum === state.sum));
-  const isSummary = state.view === 'summary';
-  $('#tracker').classList.toggle('hidden', isSummary);
-  $('#summary').classList.toggle('hidden', !isSummary);
-  isSummary ? renderSummary() : renderTracker();
+  const v = state.view;
+  $('#gamesBtn').classList.toggle('active', v === 'games');
+  $('#tracker').classList.toggle('hidden', v === 'summary' || v === 'games');
+  $('#summary').classList.toggle('hidden', v !== 'summary');
+  $('#games').classList.toggle('hidden', v !== 'games');
+  if (v === 'games') renderGames();
+  else if (v === 'summary') renderSummary();
+  else renderTracker();
+}
+
+const fmtDate = ts => new Date(ts).toLocaleString(undefined,
+  { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+// Points logged in all tracked periods of a game, for team t
+const trackedPoints = (g, t) => Object.values(g.stats)
+  .flatMap(period => Object.values(period).map(teams => points(teams[t])))
+  .reduce((a, b) => a + b, 0);
+
+function renderGames() {
+  $('#gameList').innerHTML = state.games.map(g => `
+    <div class="game-item${g.id === game.id ? ' current' : ''}">
+      <button class="open" data-open="${g.id}">
+        <b>${esc(g.teams[0])} vs ${esc(g.teams[1])}</b>
+        <small>${fmtDate(g.created)} · ${trackedPoints(g, 0)}–${trackedPoints(g, 1)} tracked pts
+          ${g.id === game.id ? ' · <span class="badge">Current</span>' : ''}</small>
+      </button>
+      <button class="del" data-del="${g.id}" aria-label="Delete game">🗑</button>
+    </div>`).join('');
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -261,17 +330,18 @@ function flash(msg, el = '#log') {
 function describe(h) {
   const shot = SHOTS.find(s => h.f.startsWith(s.k)).label;
   const where = h.q === 'ot' ? 'OT' : `Q${h.q} ${h.h} 5`;
-  return `${where} – ${state.teams[h.t]} ${shot} ${h.f.endsWith('m') ? 'made' : 'missed'}`;
+  return `${where} – ${game.teams[h.t]} ${shot} ${h.f.endsWith('m') ? 'made' : 'missed'}`;
 }
 
 // Events
 $('#mainTabs').addEventListener('click', e => {
   const v = e.target.closest('button')?.dataset.view;
   if (!v) return;
+  const fromPeriod = state.view !== 'summary' && state.view !== 'games';
   // Opening the summary jumps to the quarter you were tracking
-  if (v === 'summary' && state.view !== 'summary') state.sum = state.view;
+  if (v === 'summary' && fromPeriod) state.sum = state.view;
   // Switching to a different quarter starts at its first 5 minutes
-  if (v !== 'summary' && state.view !== 'summary' && v !== state.view) state.half = 'first';
+  if (v !== 'summary' && fromPeriod && v !== state.view) state.half = 'first';
   state.view = v; save(); render();
 });
 
@@ -291,17 +361,17 @@ $('#grid').addEventListener('click', e => {
   const b = e.target.closest('button[data-f]');
   if (!b) return;
   const h = { q: state.view, h: curHalf(), t: +b.dataset.t, f: b.dataset.f };
-  state.stats[h.q][h.h][h.t][h.f]++;
-  state.history.push(h);
+  game.stats[h.q][h.h][h.t][h.f]++;
+  game.history.push(h);
   if (navigator.vibrate) navigator.vibrate(15);
   save(); render();
   flash(describe(h));
 });
 
 $('#undo').addEventListener('click', () => {
-  const h = state.history.pop();
+  const h = game.history.pop();
   if (!h) return;
-  const s = state.stats[h.q][h.h][h.t];
+  const s = game.stats[h.q][h.h][h.t];
   s[h.f] = Math.max(0, s[h.f] - 1);
   state.view = h.q;
   if (h.h !== 'full') state.half = h.h;
@@ -311,27 +381,60 @@ $('#undo').addEventListener('click', () => {
 
 document.querySelectorAll('.team-name').forEach(i => {
   i.addEventListener('input', () => {
-    state.teams[i.dataset.team] = i.value.trim() || (i.dataset.team === '0' ? 'Home' : 'Away');
+    game.teams[i.dataset.team] = i.value.trim() || (i.dataset.team === '0' ? 'Home' : 'Away');
     save(); renderTracker();
   });
   i.addEventListener('focus', () => i.select());
-  i.addEventListener('blur', () => { i.value = state.teams[i.dataset.team]; });
+  i.addEventListener('blur', () => { i.value = game.teams[i.dataset.team]; });
   i.addEventListener('keydown', e => { if (e.key === 'Enter') i.blur(); });
 });
 
 function reset() {
   if (!confirm('Clear all stats for this game? Team names are kept.')) return;
-  const teams = state.teams;
-  state = blankState();
-  state.teams = teams;
+  game.stats = blankStats();
+  game.history = [];
+  state.view = '1'; state.half = 'first';
   save(); render();
 }
 $('#reset').addEventListener('click', reset);
 $('#reset2').addEventListener('click', reset);
 
+// Saved games
+$('#gamesBtn').addEventListener('click', () => {
+  state.view = state.view === 'games' ? '1' : 'games';
+  save(); render();
+});
+
+$('#newGame').addEventListener('click', () => {
+  const g = newGame();
+  state.games.unshift(g);
+  selectGame(g.id);
+  state.view = '1'; state.half = 'first'; state.sum = '1';
+  save(); render();
+  flash('New game started – tap the team names to set them');
+});
+
+$('#gameList').addEventListener('click', e => {
+  const open = e.target.closest('[data-open]')?.dataset.open;
+  const del = e.target.closest('[data-del]')?.dataset.del;
+  if (open) {
+    selectGame(open);
+    state.view = '1'; state.half = 'first'; state.sum = '1';
+    save(); render();
+  } else if (del) {
+    const g = state.games.find(x => x.id === del);
+    if (!confirm(`Delete "${g.teams[0]} vs ${g.teams[1]}" (${fmtDate(g.created)})? This can't be undone.`)) return;
+    state.games = state.games.filter(x => x.id !== del);
+    if (!state.games.length) state.games.push(newGame());
+    if (del === game.id) selectGame(state.games[0].id);
+    save(); render();
+    flash('Game deleted', '#log3');
+  }
+});
+
 $('#share').addEventListener('click', async () => {
   const f = (m, x) => `${m}/${m + x} (${pct(m, m + x)})`;
-  const lines = [`${state.teams[0]} vs ${state.teams[1]} – 5-min shooting stats`, ''];
+  const lines = [`${game.teams[0]} vs ${game.teams[1]} – 5-min shooting stats`, fmtDate(game.created), ''];
   const groups = [...QUARTERS, ...(otPlayed() ? ['ot'] : []), 'all'];
   const heading = { ot: '== OVERTIME ==', all: '== GAME TOTALS (Q1–Q4) ==' };
   for (const q of groups) {
@@ -340,7 +443,7 @@ $('#share').addEventListener('click', async () => {
       if (q !== 'ot') lines.push(`${title}:`);
       [0, 1].forEach(t => {
         const s = statsFor(q, half, t);
-        lines.push(`  ${state.teams[t]}: ${points(s)} pts | 3PT ${f(s.t3m, s.t3x)} | 2PT ${f(s.t2m, s.t2x)} | FT ${f(s.ftm, s.ftx)}`);
+        lines.push(`  ${game.teams[t]}: ${points(s)} pts | 3PT ${f(s.t3m, s.t3x)} | 2PT ${f(s.t2m, s.t2x)} | FT ${f(s.ftm, s.ftx)}`);
       });
     }
     lines.push('');
@@ -355,6 +458,11 @@ $('#share').addEventListener('click', async () => {
 });
 
 render();
+
+// Offline support (only works when served over http/https)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>

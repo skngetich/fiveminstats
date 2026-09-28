@@ -14,7 +14,9 @@ A simple mobile web app for tracking basketball team shooting stats in the **fir
 - Stats view per quarter, OT, and whole-game totals (FG%, 3P%, FT%, points)
 - Share or copy the stats as text
 - Editable team names
-- Saves automatically in the browser, so a refresh won't lose the game
+- **Multiple saved games:** start a new game, reopen or delete past games
+- **Works offline:** installable app (PWA), so it runs in a gym with no signal
+- Saves automatically on the device, so a refresh won't lose a game
 
 ## Usage
 
@@ -24,7 +26,22 @@ A simple mobile web app for tracking basketball team shooting stats in the **fir
 2. Tap the team names to rename them.
 3. Pick the quarter (Q1–Q4 or OT) and First 5 / Last 5, then tap ✓ for made or ✗ for missed.
 4. Open **Stats** to see the summaries and share them.
+5. Tap **☰ Games** to start a new game or switch to a saved one.
+
+Open the app once while online and it will then work offline. Saved games stay on that phone; they are not synced between devices.
 
 ## Development
 
-It's a single `index.html` with no dependencies or build step. Open it in a browser to run it locally. Pushing to `main` deploys to GitHub Pages.
+No dependencies or build step:
+
+- `index.html` – the whole app
+- `sw.js` – service worker for offline support (bump `CACHE` when the asset list changes)
+- `manifest.webmanifest` and `icons/` – install settings and icons
+
+Serve the folder locally (the service worker needs http, not `file://`):
+
+```bash
+python -m http.server 8123
+```
+
+Pushing to `main` deploys to GitHub Pages.
