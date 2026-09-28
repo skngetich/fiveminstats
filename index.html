@@ -14,11 +14,13 @@
     --bg: #f3f4f6; --card: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
     --made: #16a34a; --made-bg: #dcfce7; --miss: #dc2626; --miss-bg: #fee2e2;
     --accent: #ea580c;
+    --team0: #2a78d6; --team1: #eb6834; /* chart series: home, away */
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0b0f17; --card: #161b26; --text: #f3f4f6; --muted: #9ca3af; --line: #273042;
       --made-bg: #123821; --miss-bg: #3d1515;
+      --team0: #3987e5; --team1: #d95926;
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -93,6 +95,42 @@
   .game-item .badge { color: var(--accent); font-weight: 700; }
   .game-item .del { border: 0; border-left: 1px solid var(--line); background: none; color: var(--miss);
     font-size: 18px; padding: 0 16px; }
+  /* Insights */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { font-size: 15px; margin: 0 0 8px; }
+  .card .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .insight-list { margin: 0; padding: 0; list-style: none; }
+  .insight-list li { padding: 7px 0 7px 16px; border-bottom: 1px solid var(--line); font-size: 14px; position: relative; }
+  .insight-list li:last-child { border-bottom: 0; }
+  .insight-list li::before { content: ""; position: absolute; left: 0; top: 14px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--dot, var(--muted)); }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+  .chart .axis { font-size: 10px; fill: var(--muted); }
+  .chart .qlabel { font-size: 11px; font-weight: 600; fill: var(--text); }
+  .chart .hit { fill: transparent; outline: none; }
+  .chart .wash { fill: var(--text); opacity: 0; }
+  .chart .wash.on { opacity: .06; }
+  .tip { position: absolute; top: 0; pointer-events: none; background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; white-space: nowrap;
+    box-shadow: 0 4px 14px rgb(0 0 0 / .15); transform: translateX(-50%); z-index: 2; }
+  .tip .tl { color: var(--muted); margin-bottom: 2px; }
+  .tip .row { display: flex; align-items: center; gap: 6px; }
+  .tip .row b { font-variant-numeric: tabular-nums; }
+  .key { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+  .cmp { width: 100%; border: 0; margin: 0 0 4px; font-size: 13px; }
+  .cmp caption { font-size: 14px; }
+  .cmp caption .key { margin-right: 4px; vertical-align: 1px; }
+  .cmp td, .cmp th { padding: 6px 4px; }
+  .up { color: var(--made); font-weight: 700; }
+  .down { color: var(--miss); font-weight: 700; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .tile .big { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tile .lbl { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .tile small { color: var(--muted); font-size: 12px; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -131,6 +169,11 @@
 </section>
 
 <section id="summary" class="hidden">
+  <nav class="tabs sub" id="statsMode">
+    <button data-mode="tables">Tables</button>
+    <button data-mode="insights">Insights</button>
+  </nav>
+  <div id="insights" class="hidden" style="margin-top:12px"></div>
   <nav class="tabs sub" id="sumTabs" style="margin-bottom:12px">
     <button data-sum="1">Q1</button>
     <button data-sum="2">Q2</button>
@@ -278,12 +321,233 @@ function sections(q) {
 }
 
 function renderSummary() {
+  const insights = state.statsMode === 'insights';
+  document.querySelectorAll('#statsMode button').forEach(b => b.classList.toggle('active', b.dataset.mode === (insights ? 'insights' : 'tables')));
+  $('#insights').classList.toggle('hidden', !insights);
+  $('#sumTabs').classList.toggle('hidden', insights);
+  $('#summaryTables').classList.toggle('hidden', insights);
+  if (insights) return renderInsights();
   $('#summaryTables').innerHTML = sections(state.sum).map(([q, half, caption]) => `
     <table>
       <caption>${caption}</caption>
       <thead><tr><th>Team</th><th>3PT</th><th>2PT</th><th>FG</th><th>FT</th><th>PTS</th></tr></thead>
       <tbody>${[0, 1].map(t => row(game.teams[t], statsFor(q, half, t))).join('')}</tbody>
     </table>`).join('');
+}
+
+// ---------- Insights ----------
+
+const fga = s => s.t3m + s.t3x + s.t2m + s.t2x;
+const fgPct = s => fga(s) ? Math.round((s.t3m + s.t2m) / fga(s) * 100) : null;
+const rate = (m, x) => m + x ? Math.round(m / (m + x) * 100) : null;
+const dot = t => `<span class="key" style="background:var(--team${t});width:8px;height:8px;border-radius:50%"></span>`;
+const slotLabel = (q, h) => q === 'ot' ? 'Overtime' : `Q${q} ${h === 'first' ? 'first' : 'last'} 5`;
+
+// Every tracked period in game order, with both teams' stats
+const periodSlots = () => [
+  ...QUARTERS.flatMap(q => ['first', 'last'].map(h => ({ q, h }))),
+  ...(otPlayed() ? [{ q: 'ot', h: 'full' }] : []),
+].map(p => ({ ...p, label: slotLabel(p.q, p.h), s: game.stats[p.q][p.h] }));
+
+// Biggest scoring run per team: consecutive points with no reply from the
+// other team, counted within one tracked period (the minutes between are unknown)
+function biggestRuns() {
+  const best = [null, null];
+  let cur = null, period = null;
+  for (const h of game.history) {
+    if (!h.q || !h.f.endsWith('m')) continue; // misses don't end a run
+    if (h.q + h.h !== period) { period = h.q + h.h; cur = null; }
+    const pts = SHOTS.find(s => h.f.startsWith(s.k)).pts;
+    cur = cur && cur.t === h.t ? { ...cur, pts: cur.pts + pts } : { t: h.t, pts, q: h.q, h: h.h };
+    if (!best[h.t] || cur.pts > best[h.t].pts) best[h.t] = cur;
+  }
+  return best;
+}
+
+function keyInsights(slots, runs) {
+  const [n0, n1] = game.teams.map(esc);
+  const names = [n0, n1];
+  const out = [];
+  const add = (t, html) => out.push({ t, html });
+  const F = [0, 1].map(t => statsFor('all', 'first', t));
+  const L = [0, 1].map(t => statsFor('all', 'last', t));
+
+  for (const [S, what] of [[F, 'first 5s'], [L, 'last 5s']]) {
+    const [a, b] = S.map(points);
+    if (!a && !b) continue;
+    if (a === b) add(null, `The ${what} are tied <b>${a}–${b}</b>.`);
+    else { const w = a > b ? 0 : 1; add(w, `<b>${names[w]}</b> won the ${what} <b>${Math.max(a, b)}–${Math.min(a, b)}</b> (Q1–Q4).`); }
+  }
+
+  [0, 1].forEach(t => {
+    const f = fgPct(F[t]), l = fgPct(L[t]);
+    if (fga(F[t]) >= 4 && fga(L[t]) >= 4 && Math.abs(f - l) >= 10)
+      add(t, `<b>${names[t]}</b> shot <b>${f}%</b> FG in first 5s vs <b>${l}%</b> in last 5s – ${l < f ? 'they fade late' : 'they finish strong'}.`);
+  });
+
+  const margins = slots.map(p => ({ ...p, m: points(p.s[0]) - points(p.s[1]) }));
+  const top = margins.reduce((a, b) => b.m > a.m ? b : a, { m: 0 });
+  const low = margins.reduce((a, b) => b.m < a.m ? b : a, { m: 0 });
+  const poss = t => names[t] + (/s$/i.test(game.teams[t]) ? '’' : '’s');
+  if (top.m > 0) add(0, `<b>${poss(0)}</b> best stretch: ${top.label} (<b>+${top.m}</b>).`);
+  if (low.m < 0) add(1, `<b>${poss(1)}</b> best stretch: ${low.label} (<b>+${-low.m}</b>).`);
+
+  const q4 = game.stats['4'].last.map(points);
+  if (q4[0] || q4[1]) {
+    if (q4[0] === q4[1]) add(null, `The final 5 minutes of Q4 were even at <b>${q4[0]}–${q4[1]}</b>.`);
+    else { const w = q4[0] > q4[1] ? 0 : 1; add(w, `<b>${names[w]}</b> won the final 5 minutes of Q4 <b>${Math.max(...q4)}–${Math.min(...q4)}</b>.`); }
+  }
+
+  [0, 1].forEach(t => {
+    const all = sumTeams([F[t], L[t], game.stats.ot.full[t]]);
+    const p = points(all);
+    if (p >= 10 && all.t3m * 3 / p >= 0.4) add(t, `<b>${names[t]}</b> got <b>${Math.round(all.t3m * 300 / p)}%</b> of their points from threes.`);
+    const lft = L[t].ftm + L[t].ftx;
+    if (lft >= 4) add(t, `<b>${names[t]}</b> went <b>${L[t].ftm}/${lft}</b> at the line in last 5s (${rate(L[t].ftm, L[t].ftx)}%).`);
+  });
+
+  const r = runs.filter(Boolean).sort((a, b) => b.pts - a.pts)[0];
+  if (r && r.pts >= 6) add(r.t, `Biggest run: <b>${names[r.t]} ${r.pts}–0</b> in ${slotLabel(r.q, r.h)}.`);
+  return out;
+}
+
+// Grouped chart over the tracked periods. kind: 'bar' | 'line'.
+// value(s) returns a number or null (no data) for one team's stats.
+function periodChart(id, slots, { kind, value, yMax, ticks, fmt }) {
+  const W = 340, H = 180, m = { l: 30, r: 6, t: 8, b: 34 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, n = slots.length, sw = iw / n;
+  const cx = i => m.l + sw * (i + 0.5);
+  const y = v => m.t + ih - v / yMax * ih;
+  let g = '';
+
+  ticks.forEach(v => {
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="${v ? 1 : 1.5}"/>
+      <text class="axis" x="${m.l - 5}" y="${y(v) + 3}" text-anchor="end">${fmt(v)}</text>`;
+  });
+  // x labels: F5 / L5 under each slot, quarter name under each pair
+  slots.forEach((p, i) => {
+    g += `<text class="axis" x="${cx(i)}" y="${H - m.b + 13}" text-anchor="middle">${p.q === 'ot' ? '' : p.h === 'first' ? 'F5' : 'L5'}</text>`;
+    if (p.h !== 'last') {
+      const mid = p.q === 'ot' ? cx(i) : (cx(i) + cx(i + 1)) / 2;
+      g += `<text class="qlabel" x="${mid}" y="${H - 6}" text-anchor="middle">${p.q === 'ot' ? 'OT' : 'Q' + p.q}</text>`;
+      if (i) g += `<line x1="${m.l + sw * i}" x2="${m.l + sw * i}" y1="${m.t}" y2="${H - 4}" stroke="var(--line)" stroke-dasharray="2 3"/>`;
+    }
+  });
+  g += `<rect class="wash" y="${m.t}" width="${sw}" height="${ih}" rx="4"/>`;
+
+  const vals = slots.map(p => [0, 1].map(t => value(p.s[t])));
+  if (kind === 'bar') {
+    const bw = Math.min(12, sw * 0.32);
+    vals.forEach((vs, i) => vs.forEach((v, t) => {
+      if (!v) return;
+      const x = t ? cx(i) + 1 : cx(i) - bw - 1, top = y(v), base = y(0), r = Math.min(4, bw / 2, base - top);
+      g += `<path fill="var(--team${t})" d="M${x},${base}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${base}Z"/>`;
+    }));
+  } else {
+    [0, 1].forEach(t => {
+      // Break the line where a period has no attempts
+      let d = '', pen = false;
+      vals.forEach((vs, i) => {
+        if (vs[t] == null) { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${cx(i)},${y(vs[t])}`; pen = true;
+      });
+      g += `<path d="${d}" fill="none" stroke="var(--team${t})" stroke-width="2" stroke-linejoin="round"/>`;
+      vals.forEach((vs, i) => {
+        if (vs[t] == null) return;
+        g += t
+          ? `<rect x="${cx(i) - 4}" y="${y(vs[t]) - 4}" width="8" height="8" rx="1.5" fill="var(--team1)" stroke="var(--card)" stroke-width="2"/>`
+          : `<circle cx="${cx(i)}" cy="${y(vs[t])}" r="4" fill="var(--team0)" stroke="var(--card)" stroke-width="2"/>`;
+      });
+    });
+  }
+  // One hit column per period: the tooltip lists both teams
+  slots.forEach((p, i) => {
+    g += `<rect class="hit" data-i="${i}" x="${m.l + sw * i}" y="0" width="${sw}" height="${H}" tabindex="0" aria-label="${p.label}"/>`;
+  });
+  chartTips[id] = { slots, vals, fmt };
+  return `<div class="chart" id="${id}"><svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg><div class="tip hidden"></div></div>`;
+}
+const chartTips = {};
+
+function legend(kind) {
+  return `<div class="legend">${[0, 1].map(t => `<span>${kind === 'bar'
+    ? `<span class="key" style="background:var(--team${t});width:10px;height:10px;border-radius:2px"></span>`
+    : `<svg width="18" height="10"><line x1="0" x2="18" y1="5" y2="5" stroke="var(--team${t})" stroke-width="2"/>${t
+        ? '<rect x="5" y="1" width="8" height="8" rx="1.5" fill="var(--team1)"/>'
+        : '<circle cx="9" cy="5" r="4" fill="var(--team0)"/>'}</svg>`}${esc(game.teams[t])}</span>`).join('')}</div>`;
+}
+
+function compareTable(t) {
+  const f = statsFor('all', 'first', t), l = statsFor('all', 'last', t);
+  const delta = (a, b) => a == null || b == null ? '–'
+    : b === a ? '0' : `<span class="${b > a ? 'up' : 'down'}">${b > a ? '▲' : '▼'} ${Math.abs(b - a)}</span>`;
+  const pc = v => v == null ? '–' : v + '%';
+  const rows = [
+    ['Points', points(f), points(l)],
+    ['FG%', fgPct(f), fgPct(l), true],
+    ['3P%', rate(f.t3m, f.t3x), rate(l.t3m, l.t3x), true],
+    ['FT%', rate(f.ftm, f.ftx), rate(l.ftm, l.ftx), true],
+  ];
+  return `<table class="cmp"><caption>${dot(t)} ${esc(game.teams[t])}</caption>
+    <thead><tr><th></th><th>First 5s</th><th>Last 5s</th><th>Change</th></tr></thead>
+    <tbody>${rows.map(([k, a, b, isPct]) => `<tr><td>${k}</td>
+      <td>${isPct ? pc(a) : a}</td><td>${isPct ? pc(b) : b}</td><td>${delta(a, b)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function renderInsights() {
+  const slots = periodSlots();
+  const runs = biggestRuns();
+  const list = keyInsights(slots, runs);
+  const maxPts = Math.max(4, ...slots.flatMap(p => p.s.map(points)));
+  const step = maxPts <= 8 ? 2 : maxPts <= 20 ? 5 : 10;
+  const yMax = Math.ceil(maxPts / step) * step;
+  const ptTicks = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
+
+  $('#insights').innerHTML = `
+    <div class="card"><h3>Key insights</h3>
+      ${list.length
+        ? `<ul class="insight-list">${list.map(i => `<li style="--dot:${i.t == null ? 'var(--muted)' : `var(--team${i.t})`}">${i.html}</li>`).join('')}</ul>`
+        : '<p class="note">Log a few shots and insights will appear here.</p>'}
+    </div>
+    <div class="card"><h3>First 5 vs last 5 (Q1–Q4)</h3>${compareTable(0)}${compareTable(1)}
+      <p class="note">Change is in points, or percentage points for shooting.</p></div>
+    <div class="card"><h3>Points by period</h3>${legend('bar')}
+      ${periodChart('chartPts', slots, { kind: 'bar', value: points, yMax, ticks: ptTicks, fmt: v => v })}
+      <p class="note">Tap a period for exact numbers.</p></div>
+    <div class="card"><h3>FG% by period</h3>${legend('line')}
+      ${periodChart('chartFg', slots, { kind: 'line', value: fgPct, yMax: 100, ticks: [0, 50, 100], fmt: v => v + '%' })}
+      <p class="note">Gaps mean no field goals were attempted in that period.</p></div>
+    <div class="card"><h3>Biggest scoring runs</h3>
+      <div class="tiles">${[0, 1].map(t => `<div class="tile">
+        <div class="lbl">${dot(t)} ${esc(game.teams[t])}</div>
+        <div class="big">${runs[t] ? runs[t].pts + '–0' : '–'}</div>
+        <small>${runs[t] ? slotLabel(runs[t].q, runs[t].h) : 'No points yet'}</small></div>`).join('')}</div>
+      <p class="note">Points in a row without the other team scoring, within one tracked period.</p></div>`;
+
+  document.querySelectorAll('#insights .chart').forEach(wireTips);
+}
+
+function wireTips(chart) {
+  const { slots, vals, fmt } = chartTips[chart.id];
+  const tip = chart.querySelector('.tip'), wash = chart.querySelector('.wash');
+  const show = hit => {
+    const i = +hit.dataset.i;
+    tip.innerHTML = `<div class="tl">${slots[i].label}</div>` + [0, 1].map(t =>
+      `<div class="row"><span class="key" style="background:var(--team${t})"></span><b>${vals[i][t] == null ? '–' : fmt(vals[i][t])}</b> ${esc(game.teams[t])}</div>`).join('');
+    tip.classList.remove('hidden');
+    wash.setAttribute('x', hit.getAttribute('x'));
+    wash.classList.add('on');
+    const box = chart.getBoundingClientRect(), r = hit.getBoundingClientRect();
+    const half = tip.offsetWidth / 2;
+    tip.style.left = Math.min(Math.max(r.left - box.left + r.width / 2, half), box.width - half) + 'px';
+    tip.style.top = -tip.offsetHeight - 4 + 'px';
+  };
+  const hide = () => { tip.classList.add('hidden'); wash.classList.remove('on'); };
+  chart.addEventListener('pointermove', e => { const h = e.target.closest('.hit'); h ? show(h) : hide(); });
+  chart.addEventListener('pointerdown', e => { const h = e.target.closest('.hit'); if (h) show(h); });
+  chart.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+  chart.addEventListener('focusin', e => { const h = e.target.closest('.hit'); if (h) show(h); });
+  chart.addEventListener('focusout', hide);
 }
 
 function render() {
@@ -349,6 +613,12 @@ $('#halfTabs').addEventListener('click', e => {
   const h = e.target.closest('button')?.dataset.half;
   if (!h) return;
   state.half = h; save(); render();
+});
+
+$('#statsMode').addEventListener('click', e => {
+  const m = e.target.closest('button')?.dataset.mode;
+  if (!m) return;
+  state.statsMode = m; save(); render();
 });
 
 $('#sumTabs').addEventListener('click', e => {

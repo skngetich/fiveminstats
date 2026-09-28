@@ -12,6 +12,8 @@ A simple mobile web app for tracking basketball team shooting stats in the **fir
 - Live points and shooting percentages while you tap
 - Undo the last entry
 - Stats view per quarter, OT, and whole-game totals (FG%, 3P%, FT%, points)
+- **Insights:** auto-generated key takeaways, first 5 vs last 5 comparison,
+  points and FG% charts by period, and each team's biggest scoring run
 - Share or copy the stats as text
 - Editable team names
 - **Multiple saved games:** start a new game, reopen or delete past games
@@ -25,7 +27,7 @@ A simple mobile web app for tracking basketball team shooting stats in the **fir
    - **Android:** ⋮ menu → Add to Home screen
 2. Tap the team names to rename them.
 3. Pick the quarter (Q1–Q4 or OT) and First 5 / Last 5, then tap ✓ for made or ✗ for missed.
-4. Open **Stats** to see the summaries and share them.
+4. Open **Stats** to see the summary tables and share them, or switch to **Insights** for takeaways and charts.
 5. Tap **☰ Games** to start a new game or switch to a saved one.
 
 Open the app once while online and it will then work offline. Saved games stay on that phone; they are not synced between devices.
