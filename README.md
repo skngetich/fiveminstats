@@ -30,14 +30,14 @@ A simple mobile web app for tracking basketball team shooting stats in the **fir
 4. Open **Stats** to see totals and tables, copy a quarter with **Copy Q… stats** or send everything with **Share full game**, or switch to **Insights** for takeaways and charts.
 5. Tap **☰ Games** to start a new game or switch to a saved one.
 
-Open the app once while online and it will then work offline. Saved games stay on that phone; they are not synced between devices.
+Open the app once while online and it will then work offline. When a new version is published, an **Update available – tap to refresh** banner appears; tap it to update (saved games are kept). Saved games stay on that phone; they are not synced between devices.
 
 ## Development
 
 No dependencies or build step:
 
 - `index.html` – the whole app
-- `sw.js` – service worker for offline support (bump `CACHE` when the asset list changes)
+- `sw.js` – service worker for offline support and the update check (bump `CACHE` when the asset list changes)
 - `manifest.webmanifest` and `icons/` – install settings and icons
 
 Serve the folder locally (the service worker needs http, not `file://`):

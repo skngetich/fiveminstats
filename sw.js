@@ -1,6 +1,10 @@
-// Offline support: serve the app from cache, refresh the cache in the background.
+// Offline support.
+// - The app page is served from cache (instant, works offline). It is only
+//   replaced when the page asks for an update check, so the cached copy is
+//   always the version that is running and changes can be detected.
+// - Other assets (icons, manifest) are stale-while-revalidate.
 // Bump CACHE when the list of assets changes.
-const CACHE = 'fiveminstats-v1';
+const CACHE = 'fiveminstats-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -12,7 +16,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -23,11 +31,15 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Stale-while-revalidate: answer from cache instantly (works offline),
-// and fetch a fresh copy for next time when online.
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+
+  if (req.mode === 'navigate') {
+    e.respondWith(caches.match(req, { ignoreSearch: true }).then(cached => cached || fetch(req)));
+    return;
+  }
+
   const network = fetch(req).then(async res => {
     if (res.ok) {
       const copy = res.clone();
@@ -39,4 +51,23 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then(cached => cached || network)
   );
+});
+
+// The page sends 'check-update'; if the online app differs from the cached one,
+// cache the new version and reply 'update-available'.
+self.addEventListener('message', e => {
+  if (e.data !== 'check-update') return;
+  e.waitUntil((async () => {
+    const res = await fetch('./', { cache: 'no-cache' }).catch(() => null);
+    if (!res?.ok) return; // offline: nothing to do
+    const [forRoot, forIndex] = [res.clone(), res.clone()];
+    const fresh = await res.text();
+    const cache = await caches.open(CACHE);
+    const old = await cache.match('./');
+    const oldText = old ? await old.text() : null;
+    if (fresh === oldText) return;
+    await cache.put('./', forRoot);
+    await cache.put('./index.html', forIndex);
+    if (oldText !== null) e.source?.postMessage('update-available');
+  })());
 });

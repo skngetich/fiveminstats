@@ -100,6 +100,10 @@
   .game-total b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
   .total-card { margin-top: 0; }
   .total-card .tname { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .update-bar { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 12px);
+    max-width: 536px; margin: 0 auto; z-index: 10; border: 0; border-radius: 12px; padding: 14px;
+    background: var(--text); color: var(--bg); font: inherit; font-weight: 700;
+    box-shadow: 0 6px 20px rgb(0 0 0 / .25); }
   /* Insights */
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
   .card h3 { font-size: 15px; margin: 0 0 8px; }
@@ -196,6 +200,8 @@
   </div>
   <div class="log" id="log2"></div>
 </section>
+
+<button id="updateBar" class="update-bar hidden">⟳ Update available – tap to refresh</button>
 
 <section id="games" class="hidden">
   <button id="newGame" class="new-game">+ New game</button>
@@ -781,10 +787,22 @@ $('#share').addEventListener('click', async () => {
 
 render();
 
-// Offline support (only works when served over http/https)
+// Offline support and update check (only works when served over http/https)
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  const sw = navigator.serviceWorker;
+  sw.register('sw.js').catch(() => {});
+  sw.addEventListener('message', e => {
+    if (e.data !== 'update-available') return;
+    $('#updateBar').classList.remove('hidden');
+    document.body.style.paddingBottom = '90px'; // keep the bottom buttons reachable
+  });
+  sw.startMessages();
+  const checkForUpdate = () => { if (navigator.onLine) sw.controller?.postMessage('check-update'); };
+  sw.ready.then(checkForUpdate);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+  setInterval(checkForUpdate, 30 * 60 * 1000);
 }
+$('#updateBar').addEventListener('click', () => location.reload());
 </script>
 </body>
 </html>
