@@ -95,6 +95,11 @@
   .game-item .badge { color: var(--accent); font-weight: 700; }
   .game-item .del { border: 0; border-left: 1px solid var(--line); background: none; color: var(--miss);
     font-size: 18px; padding: 0 16px; }
+  .game-total { grid-column: 1 / -1; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--muted); }
+  .game-total b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .total-card { margin-top: 0; }
+  .total-card .tname { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Insights */
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
   .card h3 { font-size: 15px; margin: 0 0 8px; }
@@ -159,6 +164,7 @@
     <div><div class="name-wrap"><input class="team-name" data-team="0" maxlength="20" placeholder="Home team" aria-label="Home team name" enterkeyhint="done"></div><div class="pts" id="pts0">0</div></div>
     <div class="dash">–</div>
     <div><div class="name-wrap"><input class="team-name" data-team="1" maxlength="20" placeholder="Away team" aria-label="Away team name" enterkeyhint="done"></div><div class="pts" id="pts1">0</div></div>
+    <div class="game-total" id="gameTotal"></div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="actions">
@@ -182,10 +188,11 @@
     <button data-sum="ot">OT</button>
     <button data-sum="all">Game</button>
   </nav>
+  <div id="totalCard"></div>
   <div id="summaryTables"></div>
-  <div class="actions">
-    <button id="share">Share / Copy stats</button>
-    <button id="reset2" class="danger">Reset game</button>
+  <div class="actions" id="tableActions">
+    <button id="copyPart">⧉ Copy Q1 stats</button>
+    <button id="share">Share full game</button>
   </div>
   <div class="log" id="log2"></div>
 </section>
@@ -205,9 +212,7 @@ const SHOTS = [
 ];
 const QUARTERS = ['1', '2', '3', '4'];
 const HALVES = { first: 'First 5 min', last: 'Last 5 min' };
-// OT is only 5 minutes, so it's tracked as one period (all OTs combined)
-const OT_HALVES = { full: 'All overtime' };
-const halvesFor = q => q === 'ot' ? OT_HALVES : HALVES;
+// OT is only 5 minutes, so it's tracked as one period ('full', all OTs combined)
 const periodName = (q, half) => q === 'ot' ? 'Overtime' : `Q${q} · ${HALVES[half]}`;
 
 const blankTeam = () => ({ t3m: 0, t3x: 0, t2m: 0, t2x: 0, ftm: 0, ftx: 0 });
@@ -266,10 +271,16 @@ const sumTeams = list => list.reduce((acc, s) => {
   for (const k in acc) acc[k] += s[k];
   return acc;
 }, blankTeam());
-// Stats for team t in a half, for one quarter or summed across the game
-const statsFor = (q, half, t) => q === 'all'
-  ? sumTeams(QUARTERS.map(x => game.stats[x][half][t]))
-  : game.stats[q][half][t];
+// Stats for team t. q: '1'..'4', 'ot' or 'all' (Q1–Q4); half: 'first', 'last',
+// 'full' (OT) or 'total' (both 5-min periods; for 'all' that includes OT too)
+function statsFor(q, half, t) {
+  const qs = q === 'all' ? QUARTERS : [q];
+  if (half === 'total') return sumTeams([
+    ...qs.flatMap(x => Object.values(game.stats[x]).map(p => p[t])),
+    ...(q === 'all' ? [game.stats.ot.full[t]] : []),
+  ]);
+  return sumTeams(qs.map(x => game.stats[x][half][t]));
+}
 
 function renderTracker() {
   const stats = game.stats[state.view][curHalf()];
@@ -280,6 +291,8 @@ function renderTracker() {
   $('#periodLabel').textContent = periodName(state.view, curHalf());
   $('#pts0').textContent = points(stats[0]);
   $('#pts1').textContent = points(stats[1]);
+  const [g0, g1] = [0, 1].map(t => points(statsFor('all', 'total', t)));
+  $('#gameTotal').innerHTML = `Total score (all tracked minutes): <b>${g0} – ${g1}</b>`;
 
   $('#grid').innerHTML = [0, 1].map(t => `
     <div class="col">
@@ -313,12 +326,35 @@ const otPlayed = () => game.stats.ot.full.some(s => Object.values(s).some(v => v
 // Tables to show for a summary filter: [quarter, half, caption]
 function sections(q) {
   if (q === 'ot') return [['ot', 'full', 'Overtime (all OT periods)']];
-  if (q !== 'all') return Object.entries(HALVES).map(([half, title]) => [q, half, `Q${q} · ${title}`]);
+  if (q !== 'all') return [
+    ...Object.entries(HALVES).map(([half, title]) => [q, half, `Q${q} · ${title}`]),
+    [q, 'total', `Q${q} · Total (first + last 5)`],
+  ];
   return [
     ...Object.entries(HALVES).map(([half, title]) => ['all', half, `Game · all ${title.toLowerCase()}s (Q1–Q4)`]),
     ...(otPlayed() ? sections('ot') : []),
+    ['all', 'total', `Game · Total, all tracked minutes${otPlayed() ? ' (incl. OT)' : ''}`],
   ];
 }
+// The section that gives the total score for a summary filter
+const totalSection = q => sections(q).at(-1);
+const partName = q => q === 'all' ? 'game' : q === 'ot' ? 'OT' : `Q${q}`;
+
+// Plain-text stats for one summary filter, matching the tables on screen
+function statsText(q) {
+  const f = (m, x) => `${m}/${m + x} (${pct(m, m + x)})`;
+  const lines = [q === 'all' ? '== GAME TOTALS ==' : q === 'ot' ? '== OVERTIME ==' : `== Q${q} ==`];
+  for (const [sq, half, caption] of sections(q)) {
+    const title = caption.replace(/^(Q\d|Game) · /, '');
+    lines.push(title[0].toUpperCase() + title.slice(1) + ':');
+    [0, 1].forEach(t => {
+      const s = statsFor(sq, half, t);
+      lines.push(`  ${game.teams[t]}: ${points(s)} pts | 3PT ${f(s.t3m, s.t3x)} | 2PT ${f(s.t2m, s.t2x)} | FT ${f(s.ftm, s.ftx)}`);
+    });
+  }
+  return lines.join('\n');
+}
+const textHeader = () => `${game.teams[0]} vs ${game.teams[1]} – 5-min shooting stats\n${fmtDate(game.created)}`;
 
 function renderSummary() {
   const insights = state.statsMode === 'insights';
@@ -326,7 +362,19 @@ function renderSummary() {
   $('#insights').classList.toggle('hidden', !insights);
   $('#sumTabs').classList.toggle('hidden', insights);
   $('#summaryTables').classList.toggle('hidden', insights);
+  $('#totalCard').classList.toggle('hidden', insights);
+  $('#copyPart').classList.toggle('hidden', insights);
   if (insights) return renderInsights();
+
+  const [tq, th] = totalSection(state.sum);
+  const label = state.sum === 'all' ? 'Total score – all tracked minutes'
+    : state.sum === 'ot' ? 'Overtime score' : `Q${state.sum} total score (first + last 5)`;
+  $('#totalCard').innerHTML = `<div class="scoreboard total-card">
+    <div class="period-label">${label}</div>
+    ${[0, 1].map(t => `<div><div class="tname">${esc(game.teams[t])}</div><div class="pts">${points(statsFor(tq, th, t))}</div></div>`)
+      .join('<div class="dash">–</div>')}</div>`;
+  $('#copyPart').textContent = `⧉ Copy ${partName(state.sum)} stats`;
+
   $('#summaryTables').innerHTML = sections(state.sum).map(([q, half, caption]) => `
     <table>
       <caption>${caption}</caption>
@@ -667,7 +715,6 @@ function reset() {
   save(); render();
 }
 $('#reset').addEventListener('click', reset);
-$('#reset2').addEventListener('click', reset);
 
 // Saved games
 $('#gamesBtn').addEventListener('click', () => {
@@ -702,26 +749,31 @@ $('#gameList').addEventListener('click', e => {
   }
 });
 
-$('#share').addEventListener('click', async () => {
-  const f = (m, x) => `${m}/${m + x} (${pct(m, m + x)})`;
-  const lines = [`${game.teams[0]} vs ${game.teams[1]} – 5-min shooting stats`, fmtDate(game.created), ''];
-  const groups = [...QUARTERS, ...(otPlayed() ? ['ot'] : []), 'all'];
-  const heading = { ot: '== OVERTIME ==', all: '== GAME TOTALS (Q1–Q4) ==' };
-  for (const q of groups) {
-    lines.push(heading[q] || `== Q${q} ==`);
-    for (const [half, title] of Object.entries(halvesFor(q))) {
-      if (q !== 'ot') lines.push(`${title}:`);
-      [0, 1].forEach(t => {
-        const s = statsFor(q, half, t);
-        lines.push(`  ${game.teams[t]}: ${points(s)} pts | 3PT ${f(s.t3m, s.t3x)} | 2PT ${f(s.t2m, s.t2x)} | FT ${f(s.ftm, s.ftx)}`);
-      });
-    }
-    lines.push('');
+async function copyText(text, okMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for browsers that block the async clipboard API
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) return flash('Could not copy', '#log2');
   }
-  const text = lines.join('\n').trim();
+  flash(okMsg, '#log2');
+}
+
+$('#copyPart').addEventListener('click', () => {
+  copyText(`${textHeader()}\n\n${statsText(state.sum)}`, `Copied ${partName(state.sum)} stats`);
+});
+
+$('#share').addEventListener('click', async () => {
+  // OT is included in the game section, so it isn't listed on its own here
+  const text = [textHeader(), ...[...QUARTERS, 'all'].map(statsText)].join('\n\n');
   try {
     if (navigator.share) await navigator.share({ title: '5-Min Stats', text });
-    else { await navigator.clipboard.writeText(text); flash('Copied to clipboard', '#log2'); }
+    else await copyText(text, 'Copied full game stats');
   } catch (err) {
     if (err.name !== 'AbortError') flash('Could not share', '#log2');
   }
